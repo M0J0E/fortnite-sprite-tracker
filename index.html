@@ -1,0 +1,213 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fortnite Sprite Tracker</title>
+<style>
+:root{color-scheme:dark;font-family:Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:#090d1c;color:#fff}
+header{padding:30px 5%;background:linear-gradient(120deg,#172c65,#46167b)}
+h1{margin:0;font-size:clamp(26px,5vw,44px)}
+p{color:#b8c6e4}
+main{max-width:1350px;margin:auto;padding:25px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+.stat,.card{background:#151e37;border:1px solid #304066;border-radius:14px;padding:18px}
+.stat strong{display:block;font-size:30px;color:#65e8ff}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}
+input,select,button{background:#202b48;color:white;border:1px solid #465477;border-radius:9px;padding:12px;font-size:14px}
+input{flex:1;min-width:180px}
+button{cursor:pointer}
+button:hover{background:#354c78}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px}
+.card{text-align:center;position:relative}
+.art{height:150px;display:flex;align-items:center;justify-content:center;background:#0c1428;border-radius:12px;overflow:hidden}
+.art img{width:100%;height:100%;object-fit:contain}
+.placeholder{font-size:48px;color:#67779d}
+.card h3{margin:13px 0 5px}
+.tag{font-size:12px;color:#9dc6ff}
+.actions{display:flex;gap:8px;margin-top:15px}
+.actions button{flex:1;padding:9px 4px}
+.active{background:#126e60!important;border-color:#4fffc7!important}
+.progress{height:12px;background:#273453;border-radius:20px;overflow:hidden}
+.progress div{height:100%;background:linear-gradient(90deg,#20c9fa,#8d5bff);width:0}
+a{color:#74dfff}
+small{color:#9caed0}
+footer{text-align:center;padding:35px}
+</style>
+</head>
+<body>
+<header>
+<h1>✦ FORTNITE SPRITE TRACKER</h1>
+<p>Collect them all. Track your Sprites and mastery.</p>
+</header>
+<main>
+<div class="stats">
+<div class="stat">Owned<strong id="ownedCount">0</strong></div>
+<div class="stat">Mastered<strong id="masterCount">0</strong></div>
+<div class="stat">Catalog<strong id="totalCount">0</strong></div>
+</div>
+<div class="progress"><div id="progressBar"></div></div>
+<p id="percentage">0% collected</p>
+<div class="controls">
+<input id="search" placeholder="Search Sprites...">
+<select id="filter">
+<option value="all">All Sprites</option>
+<option value="missing">Missing</option>
+<option value="owned">Owned</option>
+<option value="mastered">Mastered</option>
+</select>
+<button onclick="loadCatalog()">Check updates</button>
+<button onclick="exportData()">Export progress</button>
+<button onclick="document.getElementById('importFile').click()">Import</button>
+<input type="file" id="importFile" accept=".json" hidden>
+</div>
+<p id="status">Loading collection...</p>
+<div class="grid" id="gallery"></div>
+</main>
+<footer>
+<small>Fan-made tracker. Not affiliated with Epic Games.</small>
+<p><a href="https://fortnite.gg/sprites" target="_blank" rel="noopener">View Fortnite.GG's live Sprite catalog</a></p>
+</footer>
+<script>
+const names = [
+"8-Bit","Adventure","Air","Aura","Barry O'Fish",
+"Batman","Birthday","Blinky","Boss","Burnt Peanut",
+"Bush","Chester","Crash Bandicoot","Crown","Demon",
+"Dream","Duck","Dumpster Dive","Earth","Exmarks",
+"Fire","Fishy","Ghost","Grim","Halfpeel'd",
+"Honey","Ironmouse","Jackrabbit","John Wick","Jonesy",
+"Kelper","Killswitch","King","Klombo","Lil' Flacko",
+"Lil' Squibbly","Lil' Uzi Vert Jr.","Llama","Mega Man",
+"Morgana","One Wish Willow","Onigiri","Overshield",
+"Peeky Peely","Plundarrgh","Pollo","Pond","Punk",
+"Re-Pete","Seven","Shadow","Sonic","Spooky Dash",
+"Storm Scout","Striker","Sweet Dreams","Tails",
+"The Deer","Transponder Snail","Vampire","Vini Jr.",
+"Water","Wayfinder","X-Ray","Zero Point"
+];
+const base = names.map(name=>({
+ id:name.toLowerCase().replace(/[^a-z0-9]+/g,"-"),
+ name,variant:"Base",image:""
+}));
+const KEY="fn-sprite-progress-v1";
+let progress={};
+try{progress=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+let catalog=[...base];
+const $=id=>document.getElementById(id);
+function save(){localStorage.setItem(KEY,JSON.stringify(progress))}
+function getState(id){return progress[id]||{}}
+function toggle(id,type){
+ const p=getState(id);
+ p[type]=!p[type];
+ if(type==="mastered"&&p.mastered)p.owned=true;
+ if(type==="owned"&&!p.owned)p.mastered=false;
+ progress[id]=p;save();render();
+}
+function safe(s){
+ return String(s).replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",
+ '"':"&quot;","'":"&#39;"
+ })[c]);
+}
+function render(){
+ const owned=catalog.filter(s=>getState(s.id).owned).length;
+ const mastered=catalog.filter(s=>getState(s.id).mastered).length;
+ $("ownedCount").textContent=owned;
+ $("masterCount").textContent=mastered;
+ $("totalCount").textContent=catalog.length;
+ const pct=catalog.length?Math.round(owned/catalog.length*100):0;
+ $("percentage").textContent=pct+"% collected";
+ $("progressBar").style.width=pct+"%";
+ const query=$("search").value.toLowerCase();
+ const filter=$("filter").value;
+ const visible=catalog.filter(s=>{
+ const p=getState(s.id);
+ return (s.name+" "+s.variant).toLowerCase().includes(query)
+ &&(filter==="all"||
+ filter==="owned"&&p.owned||
+ filter==="missing"&&!p.owned||
+ filter==="mastered"&&p.mastered);
+ });
+ const gallery=$("gallery");
+ gallery.replaceChildren();
+ visible.forEach(s=>{
+ const p=getState(s.id);
+ const card=document.createElement("article");
+ card.className="card";
+ const art=document.createElement("div");
+ art.className="art";
+ if(s.image&&/^https:\/\//.test(s.image)){
+ const img=document.createElement("img");
+ img.src=s.image;
+ img.alt=s.name+" "+s.variant;
+ img.loading="lazy";
+ img.onerror=()=>{art.textContent="Image unavailable"};
+ art.append(img);
+ }else{
+ art.innerHTML='<span class="placeholder">✦</span>';
+ }
+ const title=document.createElement("h3");
+ title.textContent=s.name;
+ const variant=document.createElement("div");
+ variant.className="tag";variant.textContent=s.variant;
+ const actions=document.createElement("div");
+ actions.className="actions";
+ for(const [type,label] of [["owned","Owned"],["mastered","Mastered"]]){
+ const btn=document.createElement("button");
+ btn.textContent=(p[type]?"✓ ":"")+label;
+ btn.className=p[type]?"active":"";
+ btn.onclick=()=>toggle(s.id,type);
+ actions.append(btn);
+ }
+ card.append(art,title,variant,actions);
+ gallery.append(card);
+ });
+ if(!visible.length)gallery.textContent="No matching Sprites.";
+}
+async function loadCatalog(){
+ $("status").textContent="Checking catalog...";
+ try{
+ const response=await fetch("./sprites.json?t="+Date.now(),{cache:"no-store"});
+ if(!response.ok)throw Error("No catalog feed");
+ const data=await response.json();
+ if(!Array.isArray(data)||!data.length)throw Error("Invalid catalog");
+ const valid=data.filter(s=>
+ typeof s.id==="string"&&typeof s.name==="string"
+ &&typeof s.variant==="string");
+ if(!valid.length)throw Error("Empty catalog");
+ catalog=valid;
+ $("status").textContent="Catalog loaded: "+valid.length+" entries.";
+ }catch(e){
+ $("status").textContent=
+ "Starter roster loaded. No verified live catalog connected yet.";
+ }
+ render();
+}
+function exportData(){
+ const blob=new Blob([JSON.stringify(progress,null,2)],{type:"application/json"});
+ const a=document.createElement("a");
+ a.href=URL.createObjectURL(blob);
+ a.download="sprite-progress.json";
+ a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+$("importFile").onchange=async e=>{
+ const file=e.target.files[0];
+ if(!file)return;
+ try{
+ const data=JSON.parse(await file.text());
+ if(!data||typeof data!=="object"||Array.isArray(data))
+ throw Error("Invalid file");
+ progress=data;save();render();
+ alert("Collection imported!");
+ }catch(e){alert("Could not import progress file.")}
+};
+$("search").oninput=render;
+$("filter").onchange=render;
+loadCatalog();
+</script>
+</body>
+</html>
