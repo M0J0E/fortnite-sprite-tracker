@@ -37,14 +37,18 @@ button:hover{background:#354c78}
 a{color:#74dfff}
 small{color:#9caed0}
 footer{text-align:center;padding:35px}
+.headerbar{display:flex;justify-content:flex-end;margin-bottom:7px}.menu-toggle{background:#131d3d;border:1px solid #a1b7eb;font-weight:bold;min-width:106px}.menu-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:50}.menu-backdrop[hidden]{display:none}.settings-menu{position:fixed;top:0;right:0;bottom:0;width:min(440px,100vw);z-index:51;background:#10182e;border-left:1px solid #40517c;box-shadow:-12px 0 30px #0007;padding:20px;overflow-y:auto;transform:translateX(105%);visibility:hidden;transition:transform .2s ease,visibility .2s ease}.settings-menu.open{transform:translateX(0);visibility:visible}.menu-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:18px}.menu-top h2{font-size:21px;margin:0}.menu-top button{font-size:19px}.settings-menu .profiles,.settings-menu .local-save{margin-bottom:15px}.settings-menu .profiles select{flex:1;min-width:140px}.settings-menu .privacy-note{margin:0 0 16px}.settings-menu .local-save strong{flex:1 1 100%}@media(max-width:500px){.settings-menu{padding:14px}.menu-toggle{min-width:96px}}
 </style>
 </head>
 <body>
 <header>
+<div class="headerbar"><button type="button" id="menuToggle" class="menu-toggle" aria-label="Open collection settings menu" aria-controls="settingsMenu" aria-expanded="false">☰ <span>Menu</span></button></div>
 <h1>✦ FORTNITE SPRITE TRACKER</h1>
 <p>Collect them all. Track your Sprites and mastery.</p>
 </header>
-<main>
+<div id="menuBackdrop" class="menu-backdrop" hidden></div>
+<aside id="settingsMenu" class="settings-menu" aria-label="Collection settings" aria-hidden="true" inert>
+<div class="menu-top"><h2>Collection settings</h2><button type="button" id="menuClose" aria-label="Close menu">✕</button></div>
 <section class="profiles" aria-label="Local collection profiles">
 <label for="profileSelect">Collection profile</label>
 <select id="profileSelect" aria-label="Choose local profile"></select>
@@ -60,6 +64,9 @@ footer{text-align:center;padding:35px}
 <span id="localFileStatus" class="state" role="status">Browser autosave active; no local file linked.</span>
 <p>In Chrome or Edge, choose a file once per visit. Changes to this profile are automatically written to that JSON file. Each browser profile can link a different file. Your progress always saves in this browser, even without a linked file.</p>
 </section>
+
+</aside>
+<main>
 <div class="stats">
 <div class="stat">Owned<strong id="ownedCount">0</strong></div>
 <div class="stat">Mastered<strong id="masterCount">0</strong></div>
@@ -403,6 +410,21 @@ $("clearFilters").onclick=()=>{
  $("sortFilter").value="name";
  render();
 };
+const menu=$("settingsMenu");
+const menuButton=$("menuToggle");
+function setMenuOpen(open){
+ menu.classList.toggle("open",open);
+ menu.inert=!open;
+ menu.setAttribute("aria-hidden",String(!open));
+ menuButton.setAttribute("aria-expanded",String(open));
+ $("menuBackdrop").hidden=!open;
+ document.body.style.overflow=open?"hidden":"";
+ if(open)$("menuClose").focus();else menuButton.focus();
+}
+menuButton.onclick=()=>setMenuOpen(true);
+$("menuClose").onclick=()=>setMenuOpen(false);
+$("menuBackdrop").onclick=()=>setMenuOpen(false);
+document.addEventListener("keydown",event=>{if(event.key==="Escape"&&menu.classList.contains("open"))setMenuOpen(false)});
 refreshProfiles();
 updateFileStatus();
 syncFilters();
