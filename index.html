@@ -21,6 +21,7 @@ input,select,button{background:#202b48;color:white;border:1px solid #465477;bord
 input{flex:1;min-width:180px}
 button{cursor:pointer}
 button:hover{background:#354c78}
+.filterbar{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 20px;align-items:center}.filterbar select{min-width:150px;flex:1}.filterbar button{white-space:nowrap}.filter-count{color:#b8c6e4;margin:0 0 18px;font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px}
 .card{text-align:center;position:relative}
 .art{height:150px;display:flex;align-items:center;justify-content:center;background:#0c1428;border-radius:12px;overflow:hidden}
@@ -64,6 +65,14 @@ footer{text-align:center;padding:35px}
 <button onclick="document.getElementById('importFile').click()">Import</button>
 <input type="file" id="importFile" accept=".json" hidden>
 </div>
+<div class="filterbar" aria-label="Additional Sprite filters">
+<select id="rarityFilter" aria-label="Filter by rarity"><option value="all">All rarities</option></select>
+<select id="variantFilter" aria-label="Filter by variant"><option value="all">All variants</option></select>
+<select id="availabilityFilter" aria-label="Filter by availability"><option value="all">Any availability</option><option value="available">Currently enabled</option><option value="unavailable">Not enabled</option></select>
+<select id="sortFilter" aria-label="Sort sprites"><option value="name">Name (A–Z)</option><option value="name-desc">Name (Z–A)</option><option value="rarity">Rarity (A–Z)</option><option value="missing">Missing first</option><option value="owned">Owned first</option></select>
+<button id="clearFilters" type="button">Clear filters</button>
+</div>
+<p id="resultsCount" class="filter-count" aria-live="polite"></p>
 <p id="status">Loading collection...</p>
 <div class="grid" id="gallery"></div>
 </main>
@@ -134,6 +143,17 @@ function safe(s){
  '"':"&quot;","'":"&#39;"
  })[c]);
 }
+function populateFilter(id,values,label){
+ const select=$(id),selected=select.value;
+ const unique=[...new Set(values.map(v=>String(v||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+ select.replaceChildren(new Option(label,"all"));
+ for(const value of unique)select.add(new Option(value,value));
+ select.value=unique.includes(selected)?selected:"all";
+}
+function syncFilters(){
+ populateFilter("rarityFilter",catalog.map(s=>s.rarity),"All rarities");
+ populateFilter("variantFilter",catalog.map(s=>s.variant),"All variants");
+}
 function render(){
  const owned=catalog.filter(s=>getState(s.id).owned).length;
  const mastered=catalog.filter(s=>getState(s.id).mastered).length;
@@ -145,14 +165,31 @@ function render(){
  $("progressBar").style.width=pct+"%";
  const query=$("search").value.toLowerCase();
  const filter=$("filter").value;
+ const rarity=$("rarityFilter").value;
+ const variant=$("variantFilter").value;
+ const availability=$("availabilityFilter").value;
+ const sorting=$("sortFilter").value;
  const visible=catalog.filter(s=>{
  const p=getState(s.id);
  return (s.name+" "+s.variant).toLowerCase().includes(query)
  &&(filter==="all"||
  filter==="owned"&&p.owned||
  filter==="missing"&&!p.owned||
- filter==="mastered"&&p.mastered);
+ filter==="mastered"&&p.mastered)
+ &&(rarity==="all"||s.rarity===rarity)
+ &&(variant==="all"||s.variant===variant)
+ &&(availability==="all"||(availability==="available"?s.enabled!==false:s.enabled===false));
  });
+ visible.sort((a,b)=>{
+  if(sorting==="name-desc")return b.name.localeCompare(a.name)||String(b.variant).localeCompare(String(a.variant));
+  if(sorting==="rarity")return String(a.rarity||"").localeCompare(String(b.rarity||""))||a.name.localeCompare(b.name);
+  if(sorting==="missing"||sorting==="owned"){
+   const difference=Number(!!getState(a.id).owned)-Number(!!getState(b.id).owned);
+   if(difference)return sorting==="missing"?difference:-difference;
+  }
+  return a.name.localeCompare(b.name)||String(a.variant).localeCompare(String(b.variant));
+ });
+ $("resultsCount").textContent="Showing "+visible.length+" of "+catalog.length+" Sprites";
  const gallery=$("gallery");
  gallery.replaceChildren();
  visible.forEach(s=>{
@@ -213,6 +250,7 @@ async function loadCatalog(){
    $("status").textContent="Local catalog loaded ("+valid.length+"). Live API unavailable.";
   }catch(_){$("status").textContent="Starter roster only. Live API could not be reached ("+e.message+").";}
  }
+ syncFilters();
  render();
 }
 function exportData(){
@@ -236,6 +274,14 @@ $("importFile").onchange=async e=>{
 };
 $("search").oninput=render;
 $("filter").onchange=render;
+for(const id of ["rarityFilter","variantFilter","availabilityFilter","sortFilter"])$(id).onchange=render;
+$("clearFilters").onclick=()=>{
+ $("search").value="";
+ for(const id of ["filter","rarityFilter","variantFilter","availabilityFilter"])$(id).value="all";
+ $("sortFilter").value="name";
+ render();
+};
+syncFilters();
 loadCatalog();
 </script>
 </body>
