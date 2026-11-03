@@ -13,7 +13,7 @@ header{padding:30px 5%;background:linear-gradient(120deg,#172c65,#46167b)}
 h1{margin:0;font-size:clamp(26px,5vw,44px)}
 p{color:#b8c6e4}
 main{max-width:1350px;margin:auto;padding:25px}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+.profiles{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:16px;border:1px solid #304066;border-radius:14px;background:#151e37}.profiles label{font-weight:bold}.profiles select{min-width:175px}.privacy-note{color:#a9badb;font-size:13px;margin:0 0 20px;line-height:1.5}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
 .stat,.card{background:#151e37;border:1px solid #304066;border-radius:14px;padding:18px}
 .stat strong{display:block;font-size:30px;color:#65e8ff}
 .controls{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}
@@ -45,6 +45,14 @@ footer{text-align:center;padding:35px}
 <p>Collect them all. Track your Sprites and mastery.</p>
 </header>
 <main>
+<section class="profiles" aria-label="Local collection profiles">
+<label for="profileSelect">Collection profile</label>
+<select id="profileSelect" aria-label="Choose local profile"></select>
+<button type="button" id="newProfile">+ New profile</button>
+<button type="button" id="renameProfile">Rename</button>
+<button type="button" id="deleteProfile">Delete profile</button>
+</section>
+<p class="privacy-note">🔒 Your collection stays in this browser, not on GitHub or a public leaderboard. Visitors on other devices have their own progress. Profiles on the same browser are not password-protected; anyone with access to this browser can view them. To use a different device, export and import your progress.</p>
 <div class="stats">
 <div class="stat">Owned<strong id="ownedCount">0</strong></div>
 <div class="stat">Mastered<strong id="masterCount">0</strong></div>
@@ -101,7 +109,27 @@ const base = names.map(name=>({
  id:name.toLowerCase().replace(/[^a-z0-9]+/g,"-"),
  name,variant:"Base",image:""
 }));
-const KEY="fn-sprite-progress-v1";
+const LEGACY_KEY="fn-sprite-progress-v1";
+const PROFILES_KEY="fn-sprite-local-profiles-v1";
+const ACTIVE_KEY="fn-sprite-active-profile-v1";
+const profileProgressKey=id=>"fn-sprite-progress-profile-"+id;
+function readJson(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}}
+function createId(){return "profile-"+(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+"-"+Math.random().toString(36).slice(2))}
+let profiles=readJson(PROFILES_KEY,[]);
+if(!Array.isArray(profiles))profiles=[];
+profiles=profiles.filter(p=>p&&typeof p.id==="string"&&typeof p.name==="string");
+if(!profiles.length){
+ const id=createId();
+ profiles=[{id,name:"My collection"}];
+ // Preserve any progress saved before profiles existed.
+ const legacy=readJson(LEGACY_KEY,{});
+ if(legacy&&typeof legacy==="object"&&!Array.isArray(legacy))localStorage.setItem(profileProgressKey(id),JSON.stringify(legacy));
+ localStorage.setItem(PROFILES_KEY,JSON.stringify(profiles));
+}
+let activeProfileId=localStorage.getItem(ACTIVE_KEY);
+if(!profiles.some(p=>p.id===activeProfileId))activeProfileId=profiles[0].id;
+localStorage.setItem(ACTIVE_KEY,activeProfileId);
+
 const LIVE_API="https://prod.fn-api.cc/v1/sprites";
 const asImage=v=>typeof v==="string"?v:(v&&typeof v==="object"?(v.url||v.icon||v.image||v.full||v.small||""):"");
 const imgOf=x=>asImage(x?.artwork)||asImage(x?.images?.icon)||asImage(x?.images?.smallIcon)||asImage(x?.images?.featured)||asImage(x?.image)||asImage(x?.icon)||asImage(x?.icons?.icon)||asImage(x?.icons?.large)||"";
@@ -124,11 +152,27 @@ function normalizeSprites(payload){
  return output.filter(x=>x.id&&x.name);
 }
 
-let progress={};
-try{progress=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+let progress=readJson(profileProgressKey(activeProfileId),{});
+if(!progress||typeof progress!=="object"||Array.isArray(progress))progress={};
 let catalog=[...base];
 const $=id=>document.getElementById(id);
-function save(){localStorage.setItem(KEY,JSON.stringify(progress))}
+function save(){localStorage.setItem(profileProgressKey(activeProfileId),JSON.stringify(progress))}
+function refreshProfiles(){
+ const select=$("profileSelect");select.replaceChildren();
+ for(const p of profiles)select.add(new Option(p.name,p.id));
+ select.value=activeProfileId;
+ $("deleteProfile").disabled=profiles.length===1;
+}
+function switchProfile(id){
+ if(!profiles.some(p=>p.id===id))return;
+ activeProfileId=id;
+ localStorage.setItem(ACTIVE_KEY,id);
+ progress=readJson(profileProgressKey(id),{});
+ if(!progress||typeof progress!=="object"||Array.isArray(progress))progress={};
+ refreshProfiles();render();
+}
+function saveProfiles(){localStorage.setItem(PROFILES_KEY,JSON.stringify(profiles));refreshProfiles()}
+
 function getState(id){return progress[id]||{}}
 function toggle(id,type){
  const p=getState(id);
@@ -272,6 +316,30 @@ $("importFile").onchange=async e=>{
  alert("Collection imported!");
  }catch(e){alert("Could not import progress file.")}
 };
+$("profileSelect").onchange=value=>switchProfile($("profileSelect").value);
+$("newProfile").onclick=()=>{
+ const name=prompt("New local collection name (visible to people using this browser):");
+ if(name===null)return;
+ const clean=name.trim().slice(0,40);
+ if(!clean){alert("Enter a profile name.");return;}
+ const id=createId();profiles.push({id,name:clean});saveProfiles();switchProfile(id);
+};
+$("renameProfile").onclick=()=>{
+ const current=profiles.find(p=>p.id===activeProfileId);
+ const name=prompt("Rename collection profile:",current.name);
+ if(name===null)return;
+ const clean=name.trim().slice(0,40);
+ if(!clean){alert("Enter a profile name.");return;}
+ current.name=clean;saveProfiles();
+};
+$("deleteProfile").onclick=()=>{
+ if(profiles.length<2)return;
+ const selected=profiles.find(p=>p.id===activeProfileId);
+ if(!confirm("Permanently delete local profile '"+selected.name+"' and all its tracked progress on this browser? Export a backup first if needed."))return;
+ localStorage.removeItem(profileProgressKey(activeProfileId));
+ profiles=profiles.filter(p=>p.id!==activeProfileId);
+ saveProfiles();switchProfile(profiles[0].id);
+};
 $("search").oninput=render;
 $("filter").onchange=render;
 for(const id of ["rarityFilter","variantFilter","availabilityFilter","sortFilter"])$(id).onchange=render;
@@ -281,6 +349,7 @@ $("clearFilters").onclick=()=>{
  $("sortFilter").value="name";
  render();
 };
+refreshProfiles();
 syncFilters();
 loadCatalog();
 </script>
