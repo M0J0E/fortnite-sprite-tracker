@@ -93,6 +93,28 @@ const base = names.map(name=>({
  name,variant:"Base",image:""
 }));
 const KEY="fn-sprite-progress-v1";
+const LIVE_API="https://prod.fn-api.cc/v1/sprites";
+const asImage=v=>typeof v==="string"?v:(v&&typeof v==="object"?(v.url||v.icon||v.image||v.full||v.small||""):"");
+const imgOf=x=>asImage(x?.artwork)||asImage(x?.images?.icon)||asImage(x?.images?.smallIcon)||asImage(x?.images?.featured)||asImage(x?.image)||asImage(x?.icon)||asImage(x?.icons?.icon)||asImage(x?.icons?.large)||"";
+function normalizeSprites(payload){
+ const root=payload?.data||payload?.sprites||payload?.items||payload;
+ const entries=Array.isArray(root)?root:(Array.isArray(root?.sprites)?root.sprites:Array.isArray(root?.items)?root.items:[]);
+ const output=[];
+ for(const family of entries){
+  if(!family||typeof family!=="object")continue;
+  const familyName=String(family.name||family.displayName||family.title||family.id||"Unknown Sprite");
+  const variants=Array.isArray(family.variants)?family.variants:Object.values(family.variants||{}).filter(v=>v&&typeof v==="object");
+  const originalId=String(family.id||family.mappingId||familyName.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
+  if(!variants.length){output.push({id:originalId,name:familyName,variant:"Base",image:imgOf(family),rarity:String(family.rarity?.name||family.rarity||""),enabled:family.enabled!==false});continue;}
+  for(const variant of variants){
+   const variantName=String(variant.name||variant.displayName||variant.variant||variant.type||"Base");
+   const uniqueId=String(variant.id||variant.mappingId||originalId+"-"+variantName.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
+   output.push({id:uniqueId,name:familyName,variant:variantName,image:imgOf(variant)||imgOf(family),rarity:String(variant.rarity?.name||variant.rarity||family.rarity?.name||family.rarity||""),enabled:variant.enabled!==false});
+  }
+ }
+ return output.filter(x=>x.id&&x.name);
+}
+
 let progress={};
 try{progress=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
 let catalog=[...base];
@@ -152,7 +174,7 @@ function render(){
  const title=document.createElement("h3");
  title.textContent=s.name;
  const variant=document.createElement("div");
- variant.className="tag";variant.textContent=s.variant;
+ variant.className="tag";variant.textContent=s.variant+(s.rarity?" · "+s.rarity:"")+(s.enabled===false?" · Not currently enabled":"");
  const actions=document.createElement("div");
  actions.className="actions";
  for(const [type,label] of [["owned","Owned"],["mastered","Mastered"]]){
@@ -168,21 +190,28 @@ function render(){
  if(!visible.length)gallery.textContent="No matching Sprites.";
 }
 async function loadCatalog(){
- $("status").textContent="Checking catalog...";
+ $("status").textContent="Checking live Sprite catalog...";
  try{
- const response=await fetch("./sprites.json?t="+Date.now(),{cache:"no-store"});
- if(!response.ok)throw Error("No catalog feed");
- const data=await response.json();
- if(!Array.isArray(data)||!data.length)throw Error("Invalid catalog");
- const valid=data.filter(s=>
- typeof s.id==="string"&&typeof s.name==="string"
- &&typeof s.variant==="string");
- if(!valid.length)throw Error("Empty catalog");
- catalog=valid;
- $("status").textContent="Catalog loaded: "+valid.length+" entries.";
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),12000);
+  let response;
+  try{response=await fetch(LIVE_API,{cache:"no-store",signal:controller.signal});}finally{clearTimeout(timer)}
+  if(!response.ok)throw Error("Sprite API HTTP "+response.status);
+  const data=await response.json();
+  const live=normalizeSprites(data);
+  if(!live.length)throw Error("Sprite API returned no compatible entries");
+  catalog=live;
+  $("status").textContent="Live catalog loaded: "+live.length+" variants. Unavailable artwork displays a placeholder.";
  }catch(e){
- $("status").textContent=
- "Starter roster loaded. No verified live catalog connected yet.";
+  try{
+   const response=await fetch("./sprites.json?t="+Date.now(),{cache:"no-store"});
+   if(!response.ok)throw Error("No local catalog");
+   const data=await response.json();
+   const valid=Array.isArray(data)?data.filter(s=>typeof s.id==="string"&&typeof s.name==="string"&&typeof s.variant==="string"):[];
+   if(!valid.length)throw Error("Invalid local catalog");
+   catalog=valid;
+   $("status").textContent="Local catalog loaded ("+valid.length+"). Live API unavailable.";
+  }catch(_){$("status").textContent="Starter roster only. Live API could not be reached ("+e.message+").";}
  }
  render();
 }
