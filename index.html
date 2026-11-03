@@ -21,7 +21,7 @@ input,select,button{background:#202b48;color:white;border:1px solid #465477;bord
 input{flex:1;min-width:180px}
 button{cursor:pointer}
 button:hover{background:#354c78}
-.filterbar{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 20px;align-items:center}.filterbar select{min-width:150px;flex:1}.filterbar button{white-space:nowrap}.filter-count{color:#b8c6e4;margin:0 0 18px;font-size:14px}
+.local-save{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:18px;padding:14px 16px;border:1px solid #304066;border-radius:14px;background:#151e37}.local-save p{margin:0;flex:1 1 100%;font-size:13px}.local-save .state{font-size:13px;color:#b8c6e4}.filterbar{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 20px;align-items:center}.filterbar select{min-width:150px;flex:1}.filterbar button{white-space:nowrap}.filter-count{color:#b8c6e4;margin:0 0 18px;font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px}
 .card{text-align:center;position:relative}
 .art{height:150px;display:flex;align-items:center;justify-content:center;background:#0c1428;border-radius:12px;overflow:hidden}
@@ -52,7 +52,14 @@ footer{text-align:center;padding:35px}
 <button type="button" id="renameProfile">Rename</button>
 <button type="button" id="deleteProfile">Delete profile</button>
 </section>
-<p class="privacy-note">🔒 Your collection stays in this browser, not on GitHub or a public leaderboard. Visitors on other devices have their own progress. Profiles on the same browser are not password-protected; anyone with access to this browser can view them. To use a different device, export and import your progress.</p>
+<p class="privacy-note">🔒 Your collection stays in this browser, not on GitHub or a public leaderboard. Visitors on other devices have their own progress. Profiles on the same browser are not password-protected; anyone with access to this browser can view them. To use another device, export/import your progress. A linked local JSON file is private to your computer, but other people with access to that file can read it.</p>
+<section class="local-save" aria-label="Automatic local file saving">
+<strong>Local document backup</strong>
+<button type="button" id="linkLocalFile">Create / link JSON file</button>
+<button type="button" id="disconnectLocalFile">Unlink</button>
+<span id="localFileStatus" class="state" role="status">Browser autosave active; no local file linked.</span>
+<p>In Chrome or Edge, choose a file once per visit. Changes to this profile are automatically written to that JSON file. Each browser profile can link a different file. Your progress always saves in this browser, even without a linked file.</p>
+</section>
 <div class="stats">
 <div class="stat">Owned<strong id="ownedCount">0</strong></div>
 <div class="stat">Mastered<strong id="masterCount">0</strong></div>
@@ -155,8 +162,37 @@ function normalizeSprites(payload){
 let progress=readJson(profileProgressKey(activeProfileId),{});
 if(!progress||typeof progress!=="object"||Array.isArray(progress))progress={};
 let catalog=[...base];
+// File handles are session-only; browser file permission requires a user gesture.
+const fileHandles=new Map();
+const fileWriteQueues=new Map();
+const fileStatuses=new Map();
+function updateFileStatus(){
+ const linked=fileHandles.has(activeProfileId);
+ $("disconnectLocalFile").disabled=!linked;
+ $("localFileStatus").textContent=fileStatuses.get(activeProfileId)||(linked?"Local file linked. Autosave ready.":"Browser autosave active; no local file linked.");
+}
+async function writeLocalSnapshot(id,data){
+ const handle=fileHandles.get(id);
+ if(!handle)return;
+ const preceding=fileWriteQueues.get(id)||Promise.resolve();
+ const next=preceding.catch(()=>{}).then(async()=>{
+  if(fileHandles.get(id)!==handle)return;
+  const writable=await handle.createWritable();
+  try{await writable.write(JSON.stringify(data,null,2));await writable.close();}
+  catch(error){try{await writable.abort()}catch{}throw error}
+  fileStatuses.set(id,"Saved to "+handle.name+" at "+new Date().toLocaleTimeString());
+  if(id===activeProfileId)updateFileStatus();
+ });
+ fileWriteQueues.set(id,next);
+ try{await next}catch(error){
+  fileStatuses.set(id,"File save failed: "+(error?.message||"Permission unavailable")+". Browser copy is still saved.");
+  if(id===activeProfileId)updateFileStatus();
+ }
+}
+function queueLocalSave(){void writeLocalSnapshot(activeProfileId,structuredClone(progress))}
+
 const $=id=>document.getElementById(id);
-function save(){localStorage.setItem(profileProgressKey(activeProfileId),JSON.stringify(progress))}
+function save(){localStorage.setItem(profileProgressKey(activeProfileId),JSON.stringify(progress));queueLocalSave()}
 function refreshProfiles(){
  const select=$("profileSelect");select.replaceChildren();
  for(const p of profiles)select.add(new Option(p.name,p.id));
@@ -169,7 +205,7 @@ function switchProfile(id){
  localStorage.setItem(ACTIVE_KEY,id);
  progress=readJson(profileProgressKey(id),{});
  if(!progress||typeof progress!=="object"||Array.isArray(progress))progress={};
- refreshProfiles();render();
+ refreshProfiles();updateFileStatus();render();
 }
 function saveProfiles(){localStorage.setItem(PROFILES_KEY,JSON.stringify(profiles));refreshProfiles()}
 
@@ -316,6 +352,22 @@ $("importFile").onchange=async e=>{
  alert("Collection imported!");
  }catch(e){alert("Could not import progress file.")}
 };
+$("linkLocalFile").onclick=async()=>{
+ if(!window.showSaveFilePicker){alert("Automatic local-file writing requires a supported desktop browser such as Chrome or Edge. Browser autosave and Export progress still work.");return;}
+ const id=activeProfileId;
+ try{
+  const handle=await window.showSaveFilePicker({suggestedName:"fortnite-sprites-"+(profiles.find(p=>p.id===id)?.name||"collection").toLowerCase().replace(/[^a-z0-9-]+/g,"-")+".json",types:[{description:"JSON collection backup",accept:{"application/json":[".json"]}}]});
+  fileHandles.set(id,handle);
+  fileStatuses.set(id,"Linking "+handle.name+"...");
+  updateFileStatus();
+  await writeLocalSnapshot(id,structuredClone(id===activeProfileId?progress:readJson(profileProgressKey(id),{})));
+ }catch(error){if(error?.name!=="AbortError"){fileStatuses.set(id,"Could not link file: "+error.message);updateFileStatus();}}
+};
+$("disconnectLocalFile").onclick=()=>{
+ fileHandles.delete(activeProfileId);
+ fileStatuses.delete(activeProfileId);
+ updateFileStatus();
+};
 $("profileSelect").onchange=value=>switchProfile($("profileSelect").value);
 $("newProfile").onclick=()=>{
  const name=prompt("New local collection name (visible to people using this browser):");
@@ -336,6 +388,8 @@ $("deleteProfile").onclick=()=>{
  if(profiles.length<2)return;
  const selected=profiles.find(p=>p.id===activeProfileId);
  if(!confirm("Permanently delete local profile '"+selected.name+"' and all its tracked progress on this browser? Export a backup first if needed."))return;
+ fileHandles.delete(activeProfileId);
+ fileStatuses.delete(activeProfileId);
  localStorage.removeItem(profileProgressKey(activeProfileId));
  profiles=profiles.filter(p=>p.id!==activeProfileId);
  saveProfiles();switchProfile(profiles[0].id);
@@ -350,6 +404,7 @@ $("clearFilters").onclick=()=>{
  render();
 };
 refreshProfiles();
+updateFileStatus();
 syncFilters();
 loadCatalog();
 </script>
